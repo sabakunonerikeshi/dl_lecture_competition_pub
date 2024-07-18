@@ -63,7 +63,7 @@ def run(args: DictConfig):
     #     Optimizer
     # ------------------
 
-    alpha = 0.0001    
+    alpha = 0.0005
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=alpha)
  
     # ------------------
