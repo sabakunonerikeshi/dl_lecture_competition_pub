@@ -8,6 +8,9 @@ from omegaconf import DictConfig
 import wandb
 from termcolor import cprint
 from tqdm import tqdm
+from torchvision import datasets, transforms, models
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
 
 from src.datasets import ThingsMEGDataset
 from src.models import BasicConvClassifier
@@ -27,14 +30,27 @@ def run(args: DictConfig):
     # ------------------
     loader_args = {"batch_size": args.batch_size, "num_workers": args.num_workers}
     
+    #Standard
+    scaler = StandardScaler()
+    
     train_set = ThingsMEGDataset("train", args.data_dir)
     train_loader = torch.utils.data.DataLoader(train_set, shuffle=True, **loader_args)
+    
     val_set = ThingsMEGDataset("val", args.data_dir)
     val_loader = torch.utils.data.DataLoader(val_set, shuffle=False, **loader_args)
+
     test_set = ThingsMEGDataset("test", args.data_dir)
     test_loader = torch.utils.data.DataLoader(
-        test_set, shuffle=False, batch_size=args.batch_size, num_workers=args.num_workers
+       test_set, shuffle=False, batch_size=args.batch_size, num_workers=args.num_workers
     )
+
+#   print(val_set[0])
+#   test_a = val_set[0]
+#   test_b = test_a[0]
+#   test_c = test_b[0]
+#   print(test_c)
+#   plt.plot(test_c)
+#   plt.show()
 
     # ------------------
     #       Model
@@ -42,16 +58,20 @@ def run(args: DictConfig):
     model = BasicConvClassifier(
         train_set.num_classes, train_set.seq_len, train_set.num_channels
     ).to(args.device)
-
+ 
     # ------------------
     #     Optimizer
     # ------------------
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
+    alpha = 0.0001    
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=alpha)
+ 
     # ------------------
     #   Start training
     # ------------------  
     max_val_acc = 0
+
+    
     accuracy = Accuracy(
         task="multiclass", num_classes=train_set.num_classes, top_k=10
     ).to(args.device)
@@ -64,11 +84,16 @@ def run(args: DictConfig):
         model.train()
         for X, y, subject_idxs in tqdm(train_loader, desc="Train"):
             X, y = X.to(args.device), y.to(args.device)
-
+ 
             y_pred = model(X)
             
             loss = F.cross_entropy(y_pred, y)
             train_loss.append(loss.item())
+            
+#           l2 = torch.tensor(0., requires_grad=True)
+#           for w in model.parameters():
+#              l2 = l2 + torch.norm(w)**2
+#           loss = loss + alpha*l2
             
             optimizer.zero_grad()
             loss.backward()
@@ -76,7 +101,7 @@ def run(args: DictConfig):
             
             acc = accuracy(y_pred, y)
             train_acc.append(acc.item())
-
+ 
         model.eval()
         for X, y, subject_idxs in tqdm(val_loader, desc="Validation"):
             X, y = X.to(args.device), y.to(args.device)
@@ -86,7 +111,7 @@ def run(args: DictConfig):
             
             val_loss.append(F.cross_entropy(y_pred, y).item())
             val_acc.append(accuracy(y_pred, y).item())
-
+ 
         print(f"Epoch {epoch+1}/{args.epochs} | train loss: {np.mean(train_loss):.3f} | train acc: {np.mean(train_acc):.3f} | val loss: {np.mean(val_loss):.3f} | val acc: {np.mean(val_acc):.3f}")
         torch.save(model.state_dict(), os.path.join(logdir, "model_last.pt"))
         if args.use_wandb:
@@ -102,7 +127,7 @@ def run(args: DictConfig):
     #  Start evaluation with best model
     # ----------------------------------
     model.load_state_dict(torch.load(os.path.join(logdir, "model_best.pt"), map_location=args.device))
-
+ 
     preds = [] 
     model.eval()
     for X, subject_idxs in tqdm(test_loader, desc="Validation"):        
